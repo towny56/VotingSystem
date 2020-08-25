@@ -1,0 +1,229 @@
+/**
+ * New script file
+ */
+
+/* global getFactory getAssetRegistry getParticipantRegistry emit */
+
+/**
+ *
+ * @param {org.voting.AddProblem} addpr - updating field after container departure
+ * @transaction
+ */
+
+async function AddProblem(addpr) {
+  const newProblem = addpr.problem;
+  
+  const factory = getFactory();
+  
+  const assetsReg = await getAssetRegistry('org.voting.Problem');
+  
+  // Creating new problem id
+  // const nextNumber = assetsReg.getAll().length;
+  // const nextProblemId = "PROBLEM_" + nextNumber;
+  
+  // Create the problem.
+  let problem = factory.newResource('org.voting', 'Problem', newProblem.prID);
+  
+  problem.status = newProblem.status;
+  problem.problemDescr = newProblem.problemDescr;
+  problem.bm = newProblem.bm;
+  problem.votes = newProblem.votes;
+  problem.bms = newProblem.bms;
+  
+  // Add the vehicle to the vehicle asset registry.
+  assetsReg.add(problem);
+  
+  //event ProblemAddedEvent {
+  //    --> Problem problem
+  //}
+  
+  //emit the event
+  const problemAddedEvent = factory.newEvent(
+    'org.voting', 'ProblemAddedEvent');
+  problemAddedEvent.problem = problem;
+  
+  emit(problemAddedEvent);
+}
+
+/**
+ *
+ * @param {org.voting.CloseProblem} closepr - updating field after container departure
+ * @transaction
+ */
+
+async function CloseProblem(closepr) {
+  const targetProblem = closepr.problem;
+  
+  const factory = getFactory();
+  
+  const assetsReg = await getAssetRegistry('org.voting.Problem');
+  
+  targetProblem.status = 'CLOSED';
+  assetsReg.update(targetProblem);
+  
+  let forValue = 0;
+  let againstValue = 0;
+  
+  for (let idx = 0; idx < targetProblem.bms.length; idx++) {
+  	if (targetProblem.votes[idx] === true) {
+        forValue += targetProblem.bms[idx].shares;
+    } else {
+        againstValue += targetProblem.bms[idx].shares;
+    }
+  }
+  
+  const problemClosedEvent = factory.newEvent(
+    'org.voting', 'ResultEvent');
+  problemClosedEvent.problem = targetProblem;
+  problemClosedEvent.result = forValue > againstValue;
+  
+  emit(problemClosedEvent);
+}
+
+/**
+ *
+ * @param {org.voting.ExchangeShares} exsh - updating field after container departure
+ * @transaction
+ */
+
+async function ExchangeShares(exsh) {
+  const fromMember = exsh.from;
+  const toMember = exsh.to;
+  const amount = exsh.amount;
+  
+  const factory = getFactory();
+  
+  const participsReg = await getParticipantRegistry('org.voting.BoardMember');
+  
+  const exchStatEvent = factory.newEvent(
+    'org.voting', 'ExchangeStatusEvent');
+
+  if (amount <= fromMember.shares) {
+  	fromMember.shares = fromMember.shares - amount;
+    toMember.shares = toMember.shares + amount;
+    participsReg.updateAll([toMember, fromMember]);
+    
+    exchStatEvent.exs = 'SUCCESSFUL';
+    emit(exchStatEvent);
+  } else {
+    exchStatEvent.exs = 'FAILED';
+    emit(exchStatEvent);
+  }
+}
+
+/**
+ *
+ * @param {org.voting.Vote} subvt - updating field after container departure
+ * @transaction
+ */
+
+async function Vote(subvt) {
+  const bm = subvt.bm;
+  const problem = subvt.problem;
+  const voteValue = subvt.vote;
+  
+  const factory = getFactory();
+  
+  const assetsReg = await getAssetRegistry('org.voting.Problem');
+  
+  if (problem.status === 'ACTIVE') {
+    const idx = problem.bms.map(b => b.bmID).indexOf(bm.bmID);
+
+    if (idx === -1) {
+      problem.bms.push(bm);
+      problem.votes.push(voteValue);
+    } else {
+      problem.votes[idx] = voteValue;
+    }
+
+    assetsReg.update(problem);
+  }
+}
+
+
+
+
+
+===================================================
+
+
+
+
+/*
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+namespace org.voting
+
+enum ProblemStatus {
+   o ACTIVE
+   o CLOSED
+}
+
+enum ExchangeStatus {
+   o SUCCESSFUL
+   o FAILED
+}
+
+abstract participant User identified by email {
+  o String email
+}
+
+participant BoardMember identified by bmID extends User {
+    o String bmID
+    o String name
+    o Integer shares
+}
+
+asset Problem identified by prID {
+    o ProblemStatus status
+    o String prID
+    o String problemDescr
+    --> BoardMember bm
+    o Boolean[] votes
+    --> BoardMember[] bms
+}
+
+transaction AddProblem {
+	o Problem problem
+}
+
+transaction CloseProblem {
+	o Problem problem
+}
+
+transaction ExchangeShares {
+  	--> BoardMember from
+    --> BoardMember to
+    o Integer amount
+}
+
+transaction Vote {
+  	--> BoardMember bm
+    --> Problem problem
+    o Boolean vote
+}
+
+event ResultEvent {
+    --> Problem problem
+    o Boolean result
+}
+
+event ProblemAddedEvent {
+  	--> Problem problem
+}
+
+event ExchangeStatusEvent {
+ 	o ExchangeStatus exs
+}
+
